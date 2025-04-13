@@ -1,11 +1,11 @@
 import os
+import random
 from typing import Literal
 
 from PIL import Image
 from torch.utils.data import Dataset
 
 
-# Custom PyTorch Dataset
 class classificationData(Dataset):
     def __init__(self, root_dir: Literal["test", "train", "val"], transform=None):
         self.root_dir = os.path.join(
@@ -19,7 +19,19 @@ class classificationData(Dataset):
         # Collect image paths and labels
         for label, cls in enumerate(self.classes):
             class_dir = os.path.join(self.root_dir, cls)
-            for img_name in os.listdir(class_dir):
+            all_images = os.listdir(class_dir)
+            
+            # For 'normal' class, take half the images
+            if cls == "NORMAL":
+                # Shuffle and select half
+                random.seed(42)  # For reproducibility
+                random.shuffle(all_images)
+                num_samples = len(all_images) // 2
+                selected_images = all_images[:num_samples]
+            else:
+                selected_images = all_images  # Take all images for other classes
+            
+            for img_name in selected_images:
                 img_path = os.path.join(class_dir, img_name)
                 self.image_paths.append(img_path)
                 self.labels[img_path] = label

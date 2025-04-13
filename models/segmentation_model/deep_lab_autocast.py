@@ -6,7 +6,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from dataset.scripts.segmentationData import segmentationData
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, dataset
 from torchmetrics.collections import MetricCollection
 from torchmetrics.segmentation import DiceScore,MeanIoU
 from torchmetrics.classification import MulticlassJaccardIndex
@@ -22,7 +22,7 @@ def _init_dataloader(subset: Literal["test", "train", "val"], transform=None):
     dataset = segmentationData(subset, transforms=transform)
     
     return DataLoader(
-        dataset=dataset, num_workers=2, pin_memory=True, shuffle=True, batch_size=8
+        dataset=dataset ,shuffle=True, batch_size=4
     )
 
 
@@ -71,14 +71,14 @@ def train(model, optimizer, criterion, data, num_iters=5):
         epoch_start_time = time.time()
         print(f"\nEpoch {epoch+1}/{num_iters}\n" + "-" * 10)
         metrics.reset()
-
+        avg_loss = 0
         for phase in ["train", "val"]:
             phase_start_time = time.time()
             running_loss = 0.0
             model.train(phase == "train")
             print(f"Starting  {phase.capitalize()} Phase")
             for batch_id, (img, mask) in enumerate(data[phase]):
-                print(f"\rBatch: {batch_id+1}/ {len(data[phase])}", end="", flush=True)
+                print(f"\rBatch: {batch_id+1}/ {len(data[phase])} | Loss: {running_loss/len(data[phase].dataset):.2f}", end="", flush=True)
                 img, mask = img.to(device), mask.to(device).squeeze(1)
                 optimizer.zero_grad()
 
@@ -109,7 +109,7 @@ def train(model, optimizer, criterion, data, num_iters=5):
                 best_dice_score = results[epoch]["Dice_Score"]
                 torch.save(
                     model.state_dict(),
-                    f"models/segmentation_model/Segmentation_Epoch_{epoch}.pth",
+                    f"models/segmentation_model/saved_models/Segmentation_Epoch_{epoch}.pth",
                 )
 
             print(
@@ -143,7 +143,7 @@ if __name__ == "__main__":
     optimizer = optim.AdamW(model.parameters(), lr=3e-4, weight_decay=3e-6)
     criterion = nn.CrossEntropyLoss() 
     history = train(model, optimizer, criterion, data, epochs)
-    with open("./models/saved_models_metrics/segmentation/results.json", "w") as fp:
+    with open("models/segmentation_model/metrics/TrainResults.json", "w") as fp:
         import json
 
         json.dump(history, fp)

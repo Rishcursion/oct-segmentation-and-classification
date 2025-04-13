@@ -1,24 +1,14 @@
 import gc
 import time
-from collections import Counter, defaultdict
+from collections import defaultdict
 from typing import Literal
 
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.amp.autocast_mode import autocast
-from torch.amp.grad_scaler import GradScaler
 from torch.utils.data import DataLoader
-from torchmetrics import (
-    AUROC,
-    Accuracy,
-    ConfusionMatrix,
-    F1Score,
-    MetricCollection,
-    Precision,
-    Recall,
-)
+from torchmetrics import AUROC, Accuracy, F1Score, MetricCollection, Precision, Recall
 from torchvision.models import VGG11_BN_Weights, vgg11_bn
 
 from dataset.scripts.classificationData import classificationData
@@ -61,34 +51,23 @@ def _init_model() -> tuple[nn.Module, nn.Module]:
 
     # Apply custom weight initialization to classifier layers
     model.classifier.apply(weights_init_uniform_rule)
-    print(model.classifier)
     return transforms, model.to(device)
 
 
 def _init_dataloader(
-    subset: Literal["train", "val"], batches: int = 8, transforms=None,return_weights= True
+    subset: Literal["train", "val"],
+    batches: int = 8,
+    transforms=None,
 ):
     dataset = classificationData(subset, transform=transforms)
-    class_counts = Counter(dataset.labels.values())
-    class_weights = {label: sum(class_counts.values())/(4*count) for label,count in class_counts.items()}
-    if return_weights:
-        return DataLoader(
-            dataset,
-            batch_size=batches,
-            shuffle=True,
-            num_workers=8,
-            pin_memory=True,
-            persistent_workers=True,
-        ),class_weights
-    else:
-        return DataLoader(
-            dataset,
-            batch_size=batches,
-            shuffle=True,
-            num_workers=8,
-            pin_memory=True,
-            persistent_workers=True,
-        )
+    return DataLoader(
+        dataset,
+        batch_size=batches,
+        shuffle=True,
+        num_workers=8,
+        pin_memory=True,
+        persistent_workers=True,
+    )
 
 
 def train_model(vgg, criterion, optimizer, dataloaders, num_epochs=10):
@@ -100,13 +79,18 @@ def train_model(vgg, criterion, optimizer, dataloaders, num_epochs=10):
     # Initialize Metrics
     metrics = MetricCollection(
         {
-            "ConfusionMatrix": ConfusionMatrix(task="multiclass", num_classes=4),
-            "Accuracy": Accuracy(task="multiclass", num_classes=4, average="weighted"),
-            "F1Score": F1Score(task="multiclass", num_classes=4, average="weighted"),
-            "AUROC": AUROC(task="multiclass", num_classes=4, average="weighted"),
-            "Recall": Recall(task="multiclass", num_classes=4, average="weighted"),
+            "Accuracy": Accuracy(
+                task="multiclass", num_classes=4, threshold=0.4, average="macro"
+            ),
+            "F1Score": F1Score(
+                task="multiclass", num_classes=4, average="macro", threshold=0.4
+            ),
+            "AUROC": AUROC(task="multiclass", num_classes=4, average="macro"),
+            "Recall": Recall(
+                task="multiclass", num_classes=4, average="macro", threshold=0.4
+            ),
             "Precision": Precision(
-                task="multiclass", num_classes=4, average="weighted"
+                task="multiclass", num_classes=4, average="macro", threshold=0.4
             ),
         }
     ).to(device)
@@ -139,7 +123,7 @@ def train_model(vgg, criterion, optimizer, dataloaders, num_epochs=10):
             loss = criterion(outputs, labels)
 
             loss.backward()
-            optimizer.step() 
+            optimizer.step()
 
             preds = outputs.argmax(dim=1)
             train_loss += loss.item() * inputs.size(0)
@@ -164,7 +148,9 @@ def train_model(vgg, criterion, optimizer, dataloaders, num_epochs=10):
         val_start_time = time.time()
         print("\nTraining Phase Complete\n")
         print(
-            f"Train Loss: {avg_train_loss:.4f}, Train Accuracy: {avg_train_acc:.4f}\nTime Taken: {(time.time()-train_start_time)/60:.2f} Minutes\n"
+            f"""Train Loss: {avg_train_loss:.4f}
+            Train Accuracy: {avg_train_acc:.4f}
+            Time Taken: {(time.time()-train_start_time)/60:.2f} Minutes\n"""
         )
         with torch.no_grad():
             for i, (inputs, labels) in enumerate(dataloaders["VAL"]):
@@ -192,7 +178,9 @@ def train_model(vgg, criterion, optimizer, dataloaders, num_epochs=10):
         val_results[epoch] = metrics.compute()
         print("\nValidation Phase Complete\n")
         print(
-            f"Val Loss: {avg_val_loss:.4f}, Val Accuracy: {avg_val_acc:.4f}\nTime Taken: {(time.time()-val_start_time)/60:.2f} Minutes\n"
+            f"""Val Loss: {avg_val_loss:.4f}
+            Val Accuracy: {avg_val_acc:.4f}
+            Time Taken: {(time.time()-val_start_time)/60:.2f} Minutes\n"""
         )
 
         # Save best model
@@ -222,25 +210,25 @@ def _convert_metrics(metrics_dict):
 if __name__ == "__main__":
     transforms, model = _init_model()
     # model = load_model(model)
-    dataloader = {
-        "VAL": _init_dataloader("val", transforms=transforms,return_weights=False),
+    dataloader: dict[str, DataLoader] = {
+        "VAL": _init_dataloader("val", transforms=transforms),
         "TRAIN": _init_dataloader("train", transforms=transforms),
     }
     model.cuda()
     optimizer = optim.AdamW(lr=1e-4, weight_decay=3e-6, params=model.parameters())
-    criterion = nn.CrossEntropyLoss(weight=torch.tensor(list(dataloader["TRAIN"][1].values()),dtype=torch.float32,device=device))
+    criterion = nn.CrossEntropyLoss()
     train_metrics, val_metrics = train_model(
-        model, criterion, optimizer, dataloader, num_epochs=6   
+        model, criterion, optimizer, dataloader, num_epochs=6
     )
     import json
 
     with open(
-        "./models/classification_model/saved_models_metrics/classification/train_metrics_2.json",
+        "models/classification_model/metrics/train_results.json",
         "w",
     ) as fp:
         json.dump(_convert_metrics(train_metrics), fp)
     with open(
-        "./models/classification_model/saved_models_metrics/classification/val_metrics_2.json",
+        "models/classification_model",
         "w",
     ) as fp:
         json.dump(_convert_metrics(val_metrics), fp)
