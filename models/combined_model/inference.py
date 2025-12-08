@@ -19,7 +19,7 @@ class OCTInference:
         Args:
             model_path: Optional path to model weights
         """
-        self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        self.device = torch.device("cpu" if torch.cuda.is_available() else "cpu")
         self.model = ModelAggregator()
         # Move model to inference device
         self.model.to(self.device)
